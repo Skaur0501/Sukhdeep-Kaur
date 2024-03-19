@@ -1,0 +1,297 @@
+---
+title: "Extra Credit"
+author: "Sukhdeep Kaur"
+date: "`r Sys.Date()`"
+output: word_document
+---
+```{r}
+
+library(mlbench)
+library(rpart)
+require(party)
+require(ipred)
+require(e1071)
+```
+
+
+```{r}
+# Load breast cancer dataset
+data("BreastCancer")
+head(BreastCancer)
+
+# some algorithms don't like missing values, so remove rows with missing values
+BreastCancer <- na.omit(BreastCancer) 
+# remove the unique identifier, which is useless and would confuse the machine learning algorithms
+BreastCancer$Id <- NULL 
+# partition the data set for 80% training and 20% evaluation (adapted from ?randomForest)
+set.seed(2)
+
+```
+
+```{r}
+# partition the data set for 80% training and 20% evaluation (adapted from ?randomForest)
+set.seed(2)
+ind <- sample(2, nrow(BreastCancer), replace = TRUE, prob=c(0.8, 0.2))
+
+# create model using recursive partitioning on the training data set
+require(rpart)
+x.rp <- rpart(Class ~ ., data=BreastCancer[ind == 1,])
+# predict classes for the evaluation data set
+x.rp.pred <- predict(x.rp, type="class", newdata=BreastCancer[ind == 2,])
+# score the evaluation data set (extract the probabilities)
+x.rp.prob <- predict(x.rp, type="prob", newdata=BreastCancer[ind == 2,])
+plot(x.rp, main="Decision tree created using rpart")
+
+# Show the confusion matrix
+library(caret)
+
+# Assuming you have the predicted values (x.rp.pred) and the actual target values (BreastCancer$Class[ind == 2])
+
+# Confusion Matrix
+confusion_matrix <- confusionMatrix(data = x.rp.pred, reference = BreastCancer$Class[ind == 2])
+
+# Accuracy
+accuracy <- confusion_matrix$overall['Accuracy']
+
+# Recall (Sensitivity)
+recall <- confusion_matrix$byClass['Sensitivity']
+
+# Print the results
+print(confusion_matrix)
+cat("Accuracy:", accuracy, "\n")
+cat("Recall:", recall, "\n")
+
+```
+```{r}
+# create model using conditional inference trees
+require(party)
+x.ct <- ctree(Class ~ ., data=BreastCancer[ind == 1,])
+x.ct.pred <- predict(x.ct, newdata=BreastCancer[ind == 2,])
+x.ct.prob <-  1- unlist(treeresponse(x.ct, BreastCancer[ind == 2,]), use.names=F)[seq(1,nrow(BreastCancer[ind == 2,])*2,2)]
+
+# To view the decision tree, uncomment this line.
+plot(x.ct, main="Decision tree created using condition inference trees")
+
+# Create confusion matrix
+conf_matrix <- table(x.ct.pred, BreastCancer$Class[ind == 2])
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+# Calculate recall (sensitivity)
+recall <- sensitivity(conf_matrix)
+
+# Print confusion matrix, accuracy, and recall
+print("Confusion Matrix:")
+print(conf_matrix)
+cat("Accuracy:", accuracy, "\n")
+cat("Recall:", recall, "\n")
+```
+```{r}
+# create model using random forest and bagging ensemble using conditional inference trees
+x.cf <- cforest(Class ~ ., data=BreastCancer[ind == 1,], control = cforest_unbiased(mtry = ncol(BreastCancer)-2))
+x.cf.pred <- predict(x.cf, newdata=BreastCancer[ind == 2,])
+x.cf.prob <-  1- unlist(treeresponse(x.cf, BreastCancer[ind == 2,]), use.names=F)[seq(1,nrow(BreastCancer[ind == 2,])*2,2)]
+
+# Create confusion matrix
+conf_matrix_rf <- table(x.cf.pred, BreastCancer$Class[ind == 2])
+
+# Calculate accuracy for random forest
+accuracy_rf <- sum(diag(conf_matrix_rf)) / sum(conf_matrix_rf)
+
+# Calculate recall (sensitivity) for random forest
+recall_rf <- sensitivity(conf_matrix_rf)
+# Print confusion matrix, accuracy, and recall for random forest
+print("Random Forest Confusion Matrix:")
+print(conf_matrix_rf)
+cat("Random Forest Accuracy:", accuracy_rf, "\n")
+cat("Random Forest Recall:", recall_rf, "\n")
+```
+
+
+```{r}
+# create model using bagging (bootstrap aggregating)
+require(ipred)
+x.ip <- bagging(Class ~ ., data = BreastCancer[ind == 1,])
+
+# Predict probabilities for the evaluation data set
+x.ip.prob <- predict(x.ip, newdata = BreastCancer[ind == 2,], type = "prob")
+
+```
+
+```{r}
+# create model using svm (support vector machine)
+require(e1071)
+
+# svm requires tuning
+x.svm.tune <- tune(svm, Class~., data = BreastCancer[ind == 1,],
+                   ranges = list(gamma = 2^(-8:1), cost = 2^(0:4)),
+                   tunecontrol = tune.control(sampling = "fix"))
+# display the tuning results (in text format)
+x.svm.tune
+```
+
+
+```{r}
+# If the tuning results are on the margin of the parameters (e.g., gamma = 2^-8), 
+# then widen the parameters.
+# I manually copied the cost and gamma from console messages above to parameters below.
+x.svm <- svm(Class~., data = BreastCancer[ind == 1,], cost=4, gamma=0.0625, probability = TRUE)
+x.svm.prob <- predict(x.svm, type="prob", newdata=BreastCancer[ind == 2,], probability = TRUE)
+```
+
+
+```{r}
+# Train SVM model with specified parameters
+x.svm <- svm(Class ~ ., data = BreastCancer[ind == 1,], cost = 4, gamma = 0.0625, probability = TRUE)
+
+# Predict class probabilities for the evaluation data set
+x.svm.prob <- matrix(c(x.svm.prob, 1 - x.svm.prob), ncol = 2, byrow = FALSE)
+
+# Convert the class labels to character
+BreastCancer[ind == 2, "Class"] <- as.character(BreastCancer[ind == 2, "Class"])
+
+# Convert the predicted probabilities to numeric
+x.svm.prob <- as.numeric(x.svm.prob)
+
+# Predict classes based on probabilities (assuming binary classification)
+x.svm.pred <- ifelse(x.svm.prob > 0.5, "1", "2")
+
+# Check the dimensions of x.svm.prob
+dim(x.svm.prob)  # This should print the dimensions of the x.svm.prob object
+# Check the structure of x.svm.prob
+str(x.svm.prob)
+
+# Check the first few elements of x.svm.prob
+head(x.svm.prob)
+# Assuming binary classification
+# Convert predicted probabilities to class predictions
+x.svm.pred <- ifelse(x.svm.prob > 0.5, "1", "2")
+
+# Load required library for confusion matrix
+library(caret)
+true_labels <- BreastCancer$Class[ind == 2]
+# Convert true_labels to factor with levels "1" and "2"
+true_labels <- factor(true_labels, levels = c("1", "2"))
+
+# Convert x.svm.pred to factor with levels "1" and "2"
+x.svm.pred <- factor(x.svm.pred, levels = c("1", "2"))
+
+# Ensure both vectors have the same length
+min_len <- min(length(true_labels), length(x.svm.pred))
+true_labels <- true_labels[1:min_len]
+x.svm.pred <- x.svm.pred[1:min_len]
+
+# Create confusion matrix
+conf_matrix <- confusionMatrix(data = x.svm.pred, reference = true_labels)
+
+# Print confusion matrix
+print(conf_matrix)
+
+# Extract accuracy
+accuracy <- conf_matrix$overall['Accuracy']
+
+# Calculate recall (Sensitivity)
+recall <- conf_matrix$byClass['Sensitivity']
+
+# Print accuracy and recall
+print(paste("Accuracy:", accuracy))
+print(paste("Recall:", recall))
+
+
+
+```
+
+
+```{r}
+dim(x.ip.prob)
+length(BreastCancer$Class[ind == 2])
+
+
+```
+
+```{r}
+# Load required library
+# Load required library
+library(ROCR)
+x.svm.pred 
+# Create prediction objects for each classifier
+pred_rpart <- prediction(x.rp.prob[,2], BreastCancer$Class[ind == 2])
+pred_ctree <- prediction(x.ct.prob, BreastCancer$Class[ind == 2])
+pred_cforest <- prediction(x.cf.prob, BreastCancer$Class[ind == 2])
+pred_bagging <- prediction(x.ip.prob[, 2], BreastCancer$Class[ind == 2])
+
+
+
+
+
+# Create performance objects
+perf_rpart <- performance(pred_rpart, "tpr", "fpr")
+perf_ctree <- performance(pred_ctree, "tpr", "fpr")
+perf_cforest <- performance(pred_cforest, "tpr", "fpr")
+perf_bagging <- performance(pred_bagging, "tpr", "fpr")
+
+
+# Plot ROC curves
+plot(perf_rpart, col="red", main="ROC Curves for Classifiers", lwd=2)
+plot(perf_ctree, col="blue", add=TRUE, lwd=2)
+plot(perf_cforest, col="green", add=TRUE, lwd=2)
+plot(perf_bagging, col="orange", add=TRUE, lwd=2)
+legend("bottomright", legend=c('rpart', 'ctree', 'cforest', 'bagging', 'svm'), 
+       col=c("red", "blue", "green", "orange"), lty=1, cex=0.8)
+
+# Save the current plot to a PNG file
+png(filename="roc_curve_5_models.png", width=700, height=700)
+```
+
+
+```{r}
+# Load the ROCR package which draws the ROC curves
+library(ROCR)
+
+# Create an ROCR prediction object from rpart() probabilities
+x.rp.prob.rocr <- prediction(x.rp.prob[,2], BreastCancer[ind == 2,'Class'])
+# Prepare an ROCR performance object for ROC curve (tpr=true positive rate, fpr=false positive rate)
+x.rp.perf <- performance(x.rp.prob.rocr, "tpr", "fpr")
+# Plot it
+plot(x.rp.perf, col=2, main="ROC curves comparing classification performance of five machine learning models")
+# Draw a legend.
+legend(0.6, 0.6, c('rpart', 'ctree', 'cforest', 'bagging', 'svm'), 2:6)
+```
+
+
+```{r}
+# Initialize a new plot
+plot.new()
+# ctree
+x.ct.prob.rocr <- prediction(x.ct.prob, BreastCancer[ind == 2,'Class'])
+x.ct.perf <- performance(x.ct.prob.rocr, "tpr", "fpr")
+# add=TRUE draws on the existing chart 
+plot(x.ct.perf, col=3, add=TRUE)
+```
+
+
+```{r}
+# Initialize a new plot
+plot.new()
+# cforest
+x.cf.prob.rocr <- prediction(x.cf.prob, BreastCancer[ind == 2,'Class'])
+x.cf.perf <- performance(x.cf.prob.rocr, "tpr", "fpr")
+plot(x.cf.perf, col=4, add=TRUE)
+```
+
+
+```{r}
+# Bagging
+x.ip.prob.rocr <- prediction(x.ip.prob[,2], BreastCancer[ind == 2,'Class'])
+x.ip.perf <- performance(x.ip.prob.rocr, "tpr", "fpr")
+plot.new()
+plot(x.ip.perf, col=5, add=TRUE)
+
+# Close the PNG file
+dev.off()
+```
+
+
+
+
